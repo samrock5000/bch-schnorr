@@ -329,7 +329,6 @@ dependencies = [
  "hex",
  "k256",
  "once_cell",
- "rfc6979",
  "sha2",
  "subtle",
 ]

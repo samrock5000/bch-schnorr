@@ -1,5 +1,5 @@
 use rfc6979::consts::U32;
-use secp::{MaybeScalar, Point, Scalar};
+use secp::{MaybePoint, MaybeScalar, Point, Scalar, G};
 use sha2::{Digest, Sha256};
 
 pub const PRIVKEY: &[u8; 32] = &[
@@ -12,7 +12,7 @@ pub struct Signature {
     s: MaybeScalar,
 }
 impl Signature {
-    fn from_bytes(bytes: &[u8]) -> Signature {
+    fn from_bytes(bytes: &[u8; 64]) -> Signature {
         let mut bytes = bytes.to_owned().clone();
         let (r_bytes, s_bytes) = bytes.split_at_mut(32);
         let r_bytes = <[u8; 32]>::try_from(r_bytes).expect("should be 32 bytes");
@@ -53,7 +53,7 @@ fn main() {
 
     let signature = schnorr_sign(secret_key, &msg);
     let mut x = SIG1.clone();
-    Signature::from_bytes(x.as_slice());
+    Signature::from_bytes(&x);
     let x = schnorr_sign(secret_key, &msg);
     let is_valid = schnorr_verify(public_key, x, &msg);
     // println!(
@@ -75,10 +75,9 @@ fn swap_endian(slice: &[u8]) -> Vec<u8> {
     slice.iter().cloned().rev().collect()
 }
 
-fn compute_challenge(r: &Point, pubkey: &Point, msg: &[u8]) -> MaybeScalar {
+fn compute_challenge(rx: &[u8; 32], pubkey: &Point, msg: &[u8]) -> MaybeScalar {
     let pubkey = pubkey.serialize().clone();
-    let r_bytes = r.serialize_xonly();
-    let e = r_bytes.iter().cloned().chain(pubkey.iter().cloned());
+    let e = rx.iter().cloned().chain(pubkey.iter().cloned());
     let e = e.chain(msg.iter().cloned()).collect::<Vec<u8>>();
 
     let hash = Sha256::digest(&e);
@@ -104,7 +103,7 @@ fn schnorr_sign(secret_key: Scalar, message: &[u8]) -> Signature {
 
     let pubkey = secret_key.base_point_mul();
 
-    let e = compute_challenge(&r.to_odd_y(), &pubkey, message);
+    let e = compute_challenge(&r.serialize_xonly(), &pubkey, message);
     let s = k + e * secret_key;
     Signature {
         rx: r.serialize_xonly(),
@@ -114,9 +113,20 @@ fn schnorr_sign(secret_key: Scalar, message: &[u8]) -> Signature {
 
 fn schnorr_verify(public_key: Point, signature: Signature, message: &[u8]) -> bool {
     let Signature { rx, s } = signature;
-    let e = compute_challenge(&Point::from_slice(&rx).unwrap(), &public_key, message);
-    let r = Point::from_slice(&rx).unwrap();
-    s.base_point_mul() == r + e * public_key
+    let e = compute_challenge(&rx, &public_key, message);
+    let r = s * G - e * public_key;
+    match r {
+        MaybePoint::Infinity => {
+            return false;
+        }
+        MaybePoint::Valid(p) => {
+            if !bool::from(p.is_square()) {
+                return false;
+            } else {
+                r.serialize_xonly() == rx
+            }
+        }
+    }
 }
 
 mod test {
@@ -124,64 +134,58 @@ mod test {
     use super::*;
 
     #[test]
-    fn print_sigs() {
+    fn test_sigs() {
         let secret_key = secp::Scalar::from_slice(PRIVKEY).unwrap();
-        for i in 0..10 {
+        for i in 0..100 {
             let formatted = format!("{:064x}", i);
-            let msg = Sha256::digest(formatted.to_string());
-            // println!("{:?}\n,", formatted);
-
+            let msg = Sha256::digest(hex::decode(formatted).unwrap());
             let mut sig = schnorr_sign(secret_key, &msg);
-            // println!("{:?}\n,", sig.to_bytes());
             let sig_bytes = sig.to_bytes();
-            let Signature { rx, s } = Signature::from_bytes(sig_bytes.as_slice());
-            println!("{:?}", sig.rx);
+            let Signature { rx, s } = Signature::from_bytes(&sig_bytes);
             assert_eq!(rx, sig.rx);
             assert_eq!(s, sig.s);
+            assert!(schnorr_verify(secret_key.base_point_mul(), sig, &msg));
         }
     }
     #[test]
     fn test_sig() {
-        // let public_key = Point::from_slice(PK1).unwrap();
-        // let r_array = <[u8; 32]>::try_from(&SIG1[0..32]).expect("should be 32 bytes");
-        // let s_array = <[u8; 32]>::try_from(&SIG1[32..]).expect("should be 32 bytes");
+        let public_key = Point::from_slice(PK1).unwrap();
+        let r_array = <[u8; 32]>::try_from(&SIG1[0..32]).expect("should be 32 bytes");
+        let s_array = <[u8; 32]>::try_from(&SIG1[32..]).expect("should be 32 bytes");
 
         // let r = Point::lift_x(&r_array).unwrap().to_odd_y();
-        // let s = Scalar::from_slice(&s_array);
-        // let signature = Signature {
-        //     r,
-        //     s: MaybeScalar::from(s.unwrap()).unwrap().into(),
-        // };
+        let s = Scalar::from_slice(&s_array);
+        let signature = Signature {
+            rx: r_array,
+            s: MaybeScalar::from(s.unwrap()).unwrap().into(),
+        };
 
-        // assert!(schnorr_verify(public_key, signature, MSG1));
+        assert!(schnorr_verify(public_key, signature, MSG1));
 
-        // let public_key = Point::from_slice(PK2).unwrap();
-        // let r_array = <[u8; 32]>::try_from(&SIG2[0..32]).expect("should be 32 bytes");
-        // let s_array = <[u8; 32]>::try_from(&SIG2[32..]).expect("should be 32 bytes");
+        let public_key = Point::from_slice(PK2).unwrap();
+        let r_array = <[u8; 32]>::try_from(&SIG2[0..32]).expect("should be 32 bytes");
+        let s_array = <[u8; 32]>::try_from(&SIG2[32..]).expect("should be 32 bytes");
 
-        // let r = Point::lift_x(&r_array).unwrap().to_even_y();
-        // let s = Scalar::from_slice(&s_array);
-        // let signature = Signature {
-        //     r,
-        //     s: MaybeScalar::from(s.unwrap()).unwrap().into(),
-        // };
+        let s = Scalar::from_slice(&s_array);
+        let signature = Signature {
+            rx: r_array,
+            s: MaybeScalar::from(s.unwrap()).unwrap().into(),
+        };
 
-        // assert!(schnorr_verify(public_key, signature, MSG2));
+        assert!(schnorr_verify(public_key, signature, MSG2));
 
-        // let public_key = Point::from_slice(PK3).unwrap();
-        // let r_array = <[u8; 32]>::try_from(&SIG3[0..32]).expect("should be 32 bytes");
-        // let s_array = <[u8; 32]>::try_from(&SIG3[32..]).expect("should be 32 bytes");
+        let public_key = Point::from_slice(PK3).unwrap();
+        let r_array = <[u8; 32]>::try_from(&SIG3[0..32]).expect("should be 32 bytes");
+        let s_array = <[u8; 32]>::try_from(&SIG3[32..]).expect("should be 32 bytes");
 
-        // let r = Point::lift_x(&r_array).unwrap().to_even_y();
-        // let s = Scalar::from_slice(&s_array);
-        // let signature = Signature::from_bytes(SIG3);
-        // let signature = Signature {
-        //     r,
-        //     s: MaybeScalar::from(s.unwrap()).unwrap().into(),
-        // };
+        let s = Scalar::from_slice(&s_array);
+        let signature = Signature {
+            rx: r_array,
+            s: MaybeScalar::from(s.unwrap()).unwrap().into(),
+        };
 
-        // /* Test vector 6: R.y is not a quadratic residue */
-        // assert!(!schnorr_verify(public_key, signature, MSG3));
+        /* Test vector 6: R.y is not a quadratic residue */
+        assert!(!schnorr_verify(public_key, signature, MSG3));
     }
 }
 pub const PK1: &[u8; 33] = &[

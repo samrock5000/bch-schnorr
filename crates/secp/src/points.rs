@@ -9,7 +9,6 @@ use super::{MaybeScalar, Scalar};
 #[cfg(all(feature = "k256", not(feature = "secp256k1")))]
 use k256::elliptic_curve::point::{AffineCoordinates as _, DecompactPoint as _};
 #[cfg(all(feature = "k256", not(feature = "secp256k1")))]
-use k256::AffinePoint;
 use subtle::ConstantTimeEq as _;
 
 #[cfg(feature = "k256")]
