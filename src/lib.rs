@@ -44,8 +44,13 @@ fn compute_challenge(rx: &[u8; 32], pubkey: &Point, msg: &[u8]) -> MaybeScalar {
     let hash = Sha256::digest(&e);
     MaybeScalar::reduce_from(&hash.into())
 }
-
-pub fn schnorr_sign(secret_key: Scalar, message: &[u8]) -> Result<Signature, InvalidScalarBytes> {
+pub fn scalar_from_bytes(bytes: [u8; 32]) -> Scalar {
+    Scalar::from_slice(bytes.as_slice()).unwrap()
+}
+pub fn schnorr_sign(
+    secret_key: Scalar,
+    message: &[u8; 32],
+) -> Result<Signature, InvalidScalarBytes> {
     let k = rfc6979::generate_k::<Sha256, U32>(
         secret_key.serialize().as_slice().into(),
         CURVE_ORDER_BYTES.as_slice().into(),
@@ -99,7 +104,7 @@ mod test {
         for i in 0..10 {
             let formatted = format!("{:064x}", i);
             let msg = Sha256::digest(hex::decode(formatted).unwrap());
-            let mut sig = schnorr_sign(secret_key, &msg).unwrap();
+            let mut sig = schnorr_sign(secret_key, &msg.try_into().unwrap()).unwrap();
             let sig_bytes = sig.to_bytes();
             let Signature { rx, s } = Signature::from_bytes(&sig_bytes).unwrap();
             assert_eq!(rx, sig.rx);

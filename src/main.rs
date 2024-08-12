@@ -1,13 +1,5 @@
 use secp::{MaybePoint, MaybeScalar, Point};
 
-// mod arithmetic;
-// mod errors;
-// mod points;
-// mod scalars;
-
-// use points::*;
-// use scalars::*;
-
 use std::{env, process};
 
 fn usage() {
